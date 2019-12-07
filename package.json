@@ -1,0 +1,16 @@
+{
+  "name": "html5_engine",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "node ./src/server.js",
+    "build": "wasm-pack build -d ./src/pkg && webpack --entry=./src/app.js --output=./public/app.bundle.js --mode=production"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1",
+    "path": "^0.12.7"
+  }
+}
