@@ -1,16 +1,17 @@
 {
-  "name": "html5_engine",
-  "version": "1.0.0",
-  "description": "",
-  "main": "app.js",
-  "scripts": {
-    "test": "node ./src/server.js",
-    "build": "wasm-pack build -d ./src/pkg && webpack --entry=./src/app.js --output=./public/app.bundle.js --mode=production"
-  },
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "express": "^4.17.1",
-    "path": "^0.12.7"
-  }
+    "scripts": {
+        "build": "webpack --mode production",
+        "dev": "webpack-dev-server --port 8080 --open"
+    },
+    "devDependencies": {
+        "@wasm-tool/wasm-pack-plugin": "^1.1.0",
+        "html-webpack-plugin": "^3.2.0",
+        "text-encoding": "^0.7.0",
+        "webpack": "^4.29.4",
+        "webpack-cli": "^3.1.1",
+        "webpack-dev-server": "^3.1.0"
+    },
+    "dependencies": {
+        "stats.js": "^0.17.0"
+    }
 }

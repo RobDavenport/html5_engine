@@ -1,5 +1,3 @@
-### Build
-> npm run build
+"# rust_client" 
 
-### Run
-> npm run start
+npm run dev
