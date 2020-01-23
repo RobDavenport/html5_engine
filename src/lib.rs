@@ -16,7 +16,7 @@ extern "C" {
 
 #[wasm_bindgen]
 pub struct WebGpuRenderer {
-  device: web_sys::GpuDevice
+  device: GpuDevice
 }
 
 #[wasm_bindgen]
@@ -26,8 +26,8 @@ impl WebGpuRenderer {
     log("Initializing Rust Client...");
     console_error_panic_hook::set_once();
 
-    let device = web_sys::GpuDevice::from(in_device);
-    let context = web_sys::GpuCanvasContext::from(in_canvas_context);
+    let device = GpuDevice::from(in_device);
+    let context = GpuCanvasContext::from(in_canvas_context);
 
     let queue = device.default_queue();
 
@@ -77,55 +77,114 @@ impl WebGpuRenderer {
     let frag_spriv = Uint32Array::new_with_length(frag_raw.len() as u32);
     frag_spriv.set(frag_raw_view.as_ref(), 0);
 
-    let create_vertex_buffer_result = device.create_buffer_mapped(&GpuBufferDescriptor::new(vertices.len() as f64, web_sys::GpuBufferUsage::VERTEX));
-    let vertex_array_buffer = js_sys::ArrayBuffer::from(create_vertex_buffer_result.get(1));
-    let vertex_array_view = unsafe { Float32Array::view(&vertices) };
-    let typed_vertex_array = Float32Array::new_with_length(vertex_array_buffer.byte_length());
-    typed_vertex_array.set(vertex_array_view.as_ref(), 0);
+    let vertex_buffer = device.create_buffer_mapped(&GpuBufferDescriptor::new((vertices.len() * 4) as f64, GpuBufferUsage::VERTEX));
+    let vertex_gpu_buffer = GpuBuffer::from(vertex_buffer.get(0));
+    let vertex_arr_dst_raw = vertex_buffer.get(1);
+    let vertex_array_src = unsafe { Float32Array::view(&vertices) };
+    let vertex_arr_dst = Float32Array::new(&vertex_arr_dst_raw);
+    vertex_arr_dst.set(vertex_array_src.as_ref(), 0);
+    vertex_gpu_buffer.unmap();
 
-    let create_color_buffer_result = device.create_buffer_mapped(&GpuBufferDescriptor::new(colors.len() as f64, web_sys::GpuBufferUsage::VERTEX));
-    let color_array_buffer = js_sys::ArrayBuffer::from(create_color_buffer_result.get(1));
-    let color_array_view = unsafe { Float32Array::view(&colors) };
-    let typed_color_array = Float32Array::new_with_length(color_array_buffer.byte_length());
-    typed_color_array.set(color_array_view.as_ref(), 0);
+    let color_buffer = device.create_buffer_mapped(&GpuBufferDescriptor::new((colors.len() * 4) as f64, GpuBufferUsage::VERTEX));
+    let color_gpu_buffer = GpuBuffer::from(color_buffer.get(0));
+    let color_arr_dst_raw = color_buffer.get(1);
+    let color_arr_src = unsafe { Float32Array::view(&colors) };
+    let color_arr_dst = Float32Array::new(&color_arr_dst_raw);
+    color_arr_dst.set(color_arr_src.as_ref(), 0);
+    color_gpu_buffer.unmap();
 
-    let create_index_buffer_result = device.create_buffer_mapped(&GpuBufferDescriptor::new(indexes.len() as f64, web_sys::GpuBufferUsage::INDEX));
-    let index_array_buffer = js_sys::ArrayBuffer::from(create_index_buffer_result.get(1));
-    let index_array_view = unsafe { Uint16Array::view(&indexes) };
-    let typed_index_array = Uint16Array::new_with_length(index_array_buffer.byte_length());
-    typed_color_array.set(color_array_view.as_ref(), 0);
+    let index_buffer = device.create_buffer_mapped(&GpuBufferDescriptor::new((indexes.len() * 2) as f64, GpuBufferUsage::INDEX));
+    let index_gpu_buffer = GpuBuffer::from(index_buffer.get(0));
+    let index_arr_dst_raw = index_buffer.get(1);
+    let index_arr_src = unsafe { Uint16Array::view(&indexes) };
+    let index_arr_dst = Uint16Array::new(&index_arr_dst_raw);
+    index_arr_dst.set(index_arr_src.as_ref(), 0);
+    index_gpu_buffer.unmap();
 
-    let create_uniform_buffer_result = device.create_buffer_mapped(&GpuBufferDescriptor::new(uniform_data.len() as f64, web_sys::GpuBufferUsage::UNIFORM | web_sys::GpuBufferUsage::COPY_DST));
-    let uniform_buffer = web_sys::GpuBuffer::from(create_uniform_buffer_result.get(0));
-    let uniform_array_buffer = js_sys::ArrayBuffer::from(create_uniform_buffer_result.get(1));
-    let uniform_array_view = unsafe { Float32Array::view(&uniform_data) };
-    let typed_uniform_array = Float32Array::new_with_length(uniform_array_buffer.byte_length());
-    typed_uniform_array.set(uniform_array_view.as_ref(), 0);
+    let uniform_buffer = device.create_buffer_mapped(&GpuBufferDescriptor::new((uniform_data.len() * 4) as f64, GpuBufferUsage::UNIFORM | GpuBufferUsage::COPY_DST));
+    let uniform_gpu_buffer = GpuBuffer::from(uniform_buffer.get(0));
+    let uniform_arr_dst_raw = uniform_buffer.get(1);
+    let uniform_arr_src = unsafe { Float32Array::view(&uniform_data) };
+    let uniform_arr_dst = Float32Array::new(&uniform_arr_dst_raw);
+    uniform_arr_dst.set(uniform_arr_src.as_ref(), 0);
+    uniform_gpu_buffer.unmap();
     
-    let vertex_module = device.create_shader_module(&web_sys::GpuShaderModuleDescriptor::new(&vert_spriv));
-    let fragment_module = device.create_shader_module(&web_sys::GpuShaderModuleDescriptor::new(&frag_spriv));
-
+    let vertex_module = device.create_shader_module(&GpuShaderModuleDescriptor::new(&vert_spriv));
+    let fragment_module = device.create_shader_module(&GpuShaderModuleDescriptor::new(&frag_spriv));
    
-    let bindings_array_layout = js_sys::Array::new();
-    let binding_layout = web_sys::GpuBindGroupLayoutBinding::new(0, web_sys::GpuBindingType::UniformBuffer, web_sys::GpuShaderStage::VERTEX);
+    let bindings_array_layout = Array::new();
+    let binding_layout = GpuBindGroupLayoutBinding::new(0, GpuBindingType::UniformBuffer, GpuShaderStage::VERTEX);
     bindings_array_layout.push(binding_layout.as_ref());
     let uniform_bind_group_layout = device.create_bind_group_layout(
-      &web_sys::GpuBindGroupLayoutDescriptor::new(&bindings_array_layout));
+      &GpuBindGroupLayoutDescriptor::new(&bindings_array_layout));
       
-    let bindings_array_group = js_sys::Array::new();
-    let resource = js_sys::Object::new();
-    js_sys::Reflect::set(&resource, &"buffer".into(), uniform_buffer.as_ref()).unwrap();
-    let binding_group = web_sys::GpuBindGroupBinding::new(0, &resource);
+    let bindings_array_group = Array::new();
+    let resource = Object::new();
+    Reflect::set(&resource, &"buffer".into(), uniform_gpu_buffer.as_ref()).unwrap();
+    let binding_group = GpuBindGroupBinding::new(0, &resource);
     bindings_array_group.push(binding_group.as_ref()); 
     let uniform_bind_group = device.create_bind_group(
-      &web_sys::GpuBindGroupDescriptor::new(&bindings_array_group, &uniform_bind_group_layout));
+      &GpuBindGroupDescriptor::new(&bindings_array_group, &uniform_bind_group_layout));
 
-    let bind_group_layouts = js_sys::Array::new();
+    let bind_group_layouts = Array::new();
     bind_group_layouts.push(&uniform_bind_group_layout);
     let pipeline_layout = device.create_pipeline_layout(
-      &web_sys::GpuPipelineLayoutDescriptor::new(&bind_group_layouts));
+      &GpuPipelineLayoutDescriptor::new(&bind_group_layouts));
 
-      //Continue Graphics Pipeline...
+    let position_attrib_desc = GpuVertexAttributeDescriptor::new(GpuVertexFormat::Float3, 0., 0);
+    let mut position_buffer_desc = GpuVertexBufferLayoutDescriptor::new((4 * 3) as f64, &Array::of1(position_attrib_desc.as_ref()));
+    position_buffer_desc.step_mode(GpuInputStepMode::Vertex);
+
+    let color_attrib_desc = GpuVertexAttributeDescriptor::new(GpuVertexFormat::Float3, 0., 1);
+    let mut color_buffer_desc = GpuVertexBufferLayoutDescriptor::new((4 * 3) as f64, &Array::of1(color_attrib_desc.as_ref()));
+    color_buffer_desc.step_mode(GpuInputStepMode::Vertex);
+
+    let mut vertex_state_desc = GpuVertexStateDescriptor::new();
+    let vertex_buffers_obj = Array::of2(position_buffer_desc.as_ref(), color_buffer_desc.as_ref());
+    vertex_state_desc.index_format(GpuIndexFormat::Uint16);
+    vertex_state_desc.vertex_buffers(vertex_buffers_obj.as_ref());
+
+    let vertex_stage = GpuProgrammableStageDescriptor::new("main", &vertex_module);
+    let fragment_stage = GpuProgrammableStageDescriptor::new("main", &fragment_module);
+
+    let mut depth_stencil_state = GpuDepthStencilStateDescriptor::new(GpuTextureFormat::Depth24plusStencil8);
+    depth_stencil_state.depth_write_enabled(true);
+    depth_stencil_state.depth_compare(GpuCompareFunction::Less);
+
+    let mut color_state_desc = GpuColorStateDescriptor::new(GpuTextureFormat::Bgra8unorm);
+    let mut alpha_blend = GpuBlendDescriptor::new();
+    alpha_blend.src_factor(GpuBlendFactor::SrcAlpha);
+    alpha_blend.dst_factor(GpuBlendFactor::OneMinusSrcAlpha);
+    alpha_blend.operation(GpuBlendOperation::Add);
+    let mut color_blend = GpuBlendDescriptor::new();
+    color_blend.src_factor(GpuBlendFactor::SrcAlpha);
+    color_blend.dst_factor(GpuBlendFactor::OneMinusSrcAlpha);
+    color_blend.operation(GpuBlendOperation::Add);
+
+    color_state_desc.alpha_blend(&alpha_blend);
+    color_state_desc.color_blend(&color_blend);
+    color_state_desc.write_mask(GpuColorWrite::ALL);
+
+
+    let mut rasterization_state_desc = GpuRasterizationStateDescriptor::new();
+    rasterization_state_desc.front_face(GpuFrontFace::Cw);
+    rasterization_state_desc.cull_mode(GpuCullMode::None);
+
+    let color_states = Array::of1(color_state_desc.as_ref());
+    let mut pipeline_desc = GpuRenderPipelineDescriptor::new(
+      color_states.as_ref(), 
+      GpuPrimitiveTopology::TriangleList, 
+      &vertex_stage
+    );
+    pipeline_desc.layout(&pipeline_layout);
+    pipeline_desc.fragment_stage(&fragment_stage);
+    pipeline_desc.depth_stencil_state(&depth_stencil_state);
+    pipeline_desc.vertex_state(&vertex_state_desc);
+    pipeline_desc.rasterization_state(&rasterization_state_desc);
+
+    let pipeline = device.create_render_pipeline(&pipeline_desc);
+
+    //Write Encoders...
 
     log("webGPU successfully initialized!");
 
@@ -139,7 +198,6 @@ impl WebGpuRenderer {
     Ok(())
   }
   
-  #[wasm_bindgen]
   pub fn draw(&self) {
     // let color_texture = swapchain.get_current_texture();
     // let color_texture_view = color_texture.create_view();
