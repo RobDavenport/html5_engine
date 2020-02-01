@@ -1,7 +1,5 @@
 extern crate wasm_bindgen;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::JsFuture;
 use web_sys::*;
 use js_sys::*;
 
@@ -16,18 +14,28 @@ extern "C" {
 
 #[wasm_bindgen]
 pub struct WebGpuRenderer {
-  device: GpuDevice
+  device: GpuDevice,
+  queue: GpuQueue,
+  color_texture_view: GpuTextureView,
+  depth_texture_view: GpuTextureView,
+  pipeline: GpuRenderPipeline,
+  canvas: HtmlCanvasElement,
+  vertex_gpu_buffer: GpuBuffer,
+  index_gpu_buffer: GpuBuffer,
+  color_gpu_buffer: GpuBuffer,
+  swap_chain: GpuSwapChain
 }
 
 #[wasm_bindgen]
 impl WebGpuRenderer {
   #[wasm_bindgen(constructor)]
-  pub fn new(in_device: JsValue, in_canvas_context: JsValue) -> Self {
+  pub fn new(in_device: JsValue, in_canvas_context: JsValue, in_canvas: JsValue) -> Self {
     log("Initializing Rust Client...");
     console_error_panic_hook::set_once();
 
     let device = GpuDevice::from(in_device);
     let context = GpuCanvasContext::from(in_canvas_context);
+    let canvas = HtmlCanvasElement::from(in_canvas);
 
     let queue = device.default_queue();
 
@@ -36,9 +44,14 @@ impl WebGpuRenderer {
         GpuTextureFormat::Bgra8unorm,
     ));
 
-    let mut depth_texture_desc = GpuDepthStencilStateDescriptor::new(GpuTextureFormat::Depth24plusStencil8);
-    depth_texture_desc.depth_write_enabled(true);
-    depth_texture_desc.depth_compare(GpuCompareFunction::Less);
+    let depth_texture_desc = GpuTextureDescriptor::new(
+      GpuTextureFormat::Depth24plusStencil8,
+      GpuExtent3dDict::new(1, canvas.height(), canvas.width()).as_ref(),
+      GpuTextureUsage::OUTPUT_ATTACHMENT | GpuTextureUsage::COPY_SRC
+    );
+
+    let depth_texture = device.create_texture(&depth_texture_desc);
+    let depth_texture_view = depth_texture.create_view();
 
     let color_texture = swap_chain.get_current_texture();
     let color_texture_view = color_texture.create_view();
@@ -112,25 +125,37 @@ impl WebGpuRenderer {
     let vertex_module = device.create_shader_module(&GpuShaderModuleDescriptor::new(&vert_spriv));
     let fragment_module = device.create_shader_module(&GpuShaderModuleDescriptor::new(&frag_spriv));
    
-    let bindings_array_layout = Array::new();
-    let binding_layout = GpuBindGroupLayoutBinding::new(0, GpuBindingType::UniformBuffer, GpuShaderStage::VERTEX);
-    bindings_array_layout.push(binding_layout.as_ref());
+    //Pipeline setup
     let uniform_bind_group_layout = device.create_bind_group_layout(
-      &GpuBindGroupLayoutDescriptor::new(&bindings_array_layout));
-      
-    let bindings_array_group = Array::new();
+      &GpuBindGroupLayoutDescriptor::new(
+        &Array::of1(
+          GpuBindGroupLayoutBinding::new(
+            0, 
+            GpuBindingType::UniformBuffer, 
+            GpuShaderStage::VERTEX
+          ).as_ref()
+        ).as_ref()
+      )
+    );
+    
     let resource = Object::new();
     Reflect::set(&resource, &"buffer".into(), uniform_gpu_buffer.as_ref()).unwrap();
-    let binding_group = GpuBindGroupBinding::new(0, &resource);
-    bindings_array_group.push(binding_group.as_ref()); 
     let uniform_bind_group = device.create_bind_group(
-      &GpuBindGroupDescriptor::new(&bindings_array_group, &uniform_bind_group_layout));
+      &GpuBindGroupDescriptor::new(
+        Array::of1(
+          GpuBindGroupBinding::new(
+            0, 
+            resource.as_ref()
+          ).as_ref()
+        ).as_ref(),
+        uniform_bind_group_layout.as_ref()));
 
     let bind_group_layouts = Array::new();
     bind_group_layouts.push(&uniform_bind_group_layout);
     let pipeline_layout = device.create_pipeline_layout(
       &GpuPipelineLayoutDescriptor::new(&bind_group_layouts));
 
+    //Graphics Pipeline
     let position_attrib_desc = GpuVertexAttributeDescriptor::new(GpuVertexFormat::Float3, 0., 0);
     let mut position_buffer_desc = GpuVertexBufferLayoutDescriptor::new((4 * 3) as f64, &Array::of1(position_attrib_desc.as_ref()));
     position_buffer_desc.step_mode(GpuInputStepMode::Vertex);
@@ -165,7 +190,6 @@ impl WebGpuRenderer {
     color_state_desc.color_blend(&color_blend);
     color_state_desc.write_mask(GpuColorWrite::ALL);
 
-
     let mut rasterization_state_desc = GpuRasterizationStateDescriptor::new();
     rasterization_state_desc.front_face(GpuFrontFace::Cw);
     rasterization_state_desc.cull_mode(GpuCullMode::None);
@@ -184,13 +208,55 @@ impl WebGpuRenderer {
 
     let pipeline = device.create_render_pipeline(&pipeline_desc);
 
-    //Write Encoders...
-
     log("webGPU successfully initialized!");
 
     Self {
-      device 
+      device,
+      queue,
+      color_texture_view,
+      depth_texture_view,
+      pipeline,
+      canvas,
+      vertex_gpu_buffer,
+      index_gpu_buffer,
+      color_gpu_buffer,
+      swap_chain
     }
+  }
+
+  fn encode_commands(&self) {
+    let mut color_attachment = GpuRenderPassColorAttachmentDescriptor::new(
+      &self.color_texture_view,
+      GpuColorDict::new(1., 0., 0., 0.,).as_ref()
+    );
+    color_attachment.store_op(GpuStoreOp::Store);
+
+    let depth_attachment = GpuRenderPassDepthStencilAttachmentDescriptor::new(
+      &self.depth_texture_view,
+      &JsValue::from(1.),
+      GpuStoreOp::Store,
+      &JsValue::from(GpuLoadOp::Load),
+      GpuStoreOp::Store
+    );
+
+    let mut render_pass_desc = GpuRenderPassDescriptor::new(
+      Array::of1(color_attachment.as_ref()).as_ref(),
+    );
+    render_pass_desc.depth_stencil_attachment(&depth_attachment);
+
+    let command_encoder = self.device.create_command_encoder();
+
+    let pass_encoder = command_encoder.begin_render_pass(&render_pass_desc);
+    pass_encoder.set_pipeline(&self.pipeline);
+    pass_encoder.set_viewport(0., 0., self.canvas.width() as f32, self.canvas.height() as f32, 0., 1.);
+    pass_encoder.set_scissor_rect(0, 0, self.canvas.width(), self.canvas.height());
+    pass_encoder.set_vertex_buffer(0, &self.vertex_gpu_buffer);
+    pass_encoder.set_vertex_buffer(1, &self.color_gpu_buffer);
+    pass_encoder.set_index_buffer(&self.index_gpu_buffer);
+    pass_encoder.draw_indexed(3, 1, 0, 0, 0);
+    pass_encoder.end_pass();
+
+    self.queue.submit(Array::of1(command_encoder.finish().as_ref()).as_ref());
   }
 
   pub fn update(&self, time: f32, width: f32, height: f32) -> Result<(), JsValue> {
@@ -198,9 +264,9 @@ impl WebGpuRenderer {
     Ok(())
   }
   
-  pub fn draw(&self) {
-    // let color_texture = swapchain.get_current_texture();
-    // let color_texture_view = color_texture.create_view();
-      
+  pub fn draw(&mut self) {
+    let color_texture = self.swap_chain.get_current_texture();
+    self.color_texture_view = color_texture.create_view();
+    self.encode_commands();
   }
 }

@@ -19,10 +19,11 @@ updateWindow = _ => {
 }
 
 rust.then(async (r) => {
-  const entry = navigator.gpu
+  const entry = await navigator.gpu
   const canvasContext = canvas.getContext('gpupresent')
+  console.log(canvasContext)
 
-  if (!entry || !canvasContext) {
+  if (!entry) {
     alert("WEBGPU NOT SUPPORTED!")
     return
   }
@@ -30,7 +31,7 @@ rust.then(async (r) => {
   let adapter = await entry.requestAdapter();
   let device = await adapter.requestDevice();
 
-  let client = new r.WebGpuRenderer(device, canvasContext)
+  let client = new r.WebGpuRenderer(device, canvasContext, canvas)
 
   let stats = new Stats()
   document.body.appendChild( stats.dom )
